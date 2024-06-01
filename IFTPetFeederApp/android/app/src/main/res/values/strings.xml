@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">IFT\nPETFEEDER</string>
+    <string name="channel_name">Nama Kanal Notifikasi</string>
+    <string name="channel_description">Deskripsi Kanal Notifikasi</string>
+</resources>

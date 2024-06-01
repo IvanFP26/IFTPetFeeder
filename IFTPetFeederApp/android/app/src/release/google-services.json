@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "827300223020",
+    "firebase_url": "https://iftpetfeedercoba-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "iftpetfeedercoba",
+    "storage_bucket": "iftpetfeedercoba.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:827300223020:android:15b3d07f074968687d1989",
+        "android_client_info": {
+          "package_name": "com.iftpetfeedervol2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCnjjS0gA807Lt6WiE5Y2Zk9Zx52S2xPKI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
