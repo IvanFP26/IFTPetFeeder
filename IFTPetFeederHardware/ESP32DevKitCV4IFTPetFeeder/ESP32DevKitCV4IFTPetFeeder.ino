@@ -1,20 +1,15 @@
-#include <ESP32Servo.h> 
-#include <NewPing.h>
-#include "time.h"
-#include <ArduinoJson.h>
-#include <HX711_ADC.h>
-
-#include <Firebase_ESP_Client.h>
 #include <WiFi.h>
-
+#include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
 #include <addons/RTDBHelper.h>
+#include <ArduinoJson.h>
+#include <time.h>
+#include <ESP32Servo.h> 
+#include <NewPing.h>
+#include <HX711_ADC.h>
 
-String WIFI_SSID;
-String WIFI_PASSWORD;
 #define API_KEY "AIzaSyA6R1rzEfKVWiNFu1sTIbMHkH7zQ3EYgBk"
 #define DATABASE_URL "https://iftpetfeedercoba-default-rtdb.asia-southeast1.firebasedatabase.app/"
-#define STORAGE_BUCKET_ID "iftpetfeedercoba.appspot.com"
 #define USER_EMAIL "petfeederift@gmail.com"
 #define USER_PASSWORD "123456"
 
@@ -23,11 +18,16 @@ FirebaseAuth auth;
 FirebaseConfig config;
 bool signupOK = false;
 
+String WIFI_SSID;
+String WIFI_PASSWORD;
 bool receivedSSID = false;
 bool receivedPASS = false;
 
-const int MAX_TASKS = 10; 
-
+JsonObject schedule;
+String firebaseJsonString;
+//DeserializationError error;
+bool success;
+DynamicJsonDocument doc(512);
 struct Task {
   int Action;
   String Day;
@@ -35,24 +35,19 @@ struct Task {
   int Gram;
   String Time;
 };
-
+const int MAX_TASKS = 10; 
 Task tasks[MAX_TASKS];
 
 String sFoodPositionData;
 String mFoodPositionData;
-JsonObject schedule;
 int mCheckValue;
 int mGramValue;
 int GramValue;
-bool success;
-String firebaseJsonString;
-DeserializationError error;
 int StapleValue = 0;
 int SnackValue = 0;
 String DateFB;
 int StapleFeed = 0;
 int SnackFeed = 0;
-DynamicJsonDocument doc(512);
 
 const char* ntpServer = "asia.pool.ntp.org";
 const long  gmtOffset_sec = 7 * 3600;
@@ -61,29 +56,35 @@ String DateMonthYearNTP;
 String HourMinuteNTP;
 String DateNTP;
 String timeWeekDay;
+
 const char* IFT = "/IFTPetFeeder1";
 const char* Token = "TW01";
 
 Servo servo180;
 Servo servo360staple;
 Servo servo360snack;
+#define servo180pin        2
+#define servo360staplepin  4
+#define servo360snackpin   26
+int servo180position = 0;
 
-const int HX711_dout = 13;
-const int HX711_sck = 15;
-
+#define HX711_dout  13
+#define HX711_sck   15
 HX711_ADC LoadCell(HX711_dout, HX711_sck);
 
-int buttonPin1 = 35;
-int buttonPin2 = 21;
-int buttonPin3 = 34;
+#define buttonPin1  35
+#define buttonPin2  21
+#define buttonPin3  34
 
-int LedRed = 14;
-int LedGreen = 27;
+#define LedRed   14
+#define LedGreen 27
 
-int trigPin = 19;
-int echoPin = 18;
-int trigPin2 = 22;
-int echoPin2 = 23;
+int staplestatus = 0;
+int snackstatus = 0;
+#define trigPin   19
+#define echoPin   18
+#define trigPin2  22
+#define echoPin2  23
 NewPing Distance1(trigPin, echoPin);
 NewPing Distance2(trigPin2, echoPin2);
 
@@ -91,14 +92,6 @@ int buttonState1 = 0;
 int buttonState2 = 0;
 int buttonState3 = 0;
 
-int lastButtonState1 = 0;
-int lastButtonState2 = 0;
-int lastButtonState3 = 0;
-
-int staplestatus = 0;
-int snackstatus = 0;
-
-int servo180position = 0;
 unsigned long previousMillis1 = 0;
 unsigned long previousMillis2 = 0;
 unsigned long previousMillis3 = 0;
@@ -106,11 +99,9 @@ unsigned long previousMillis4 = 0;
 
 void setup() {
   Serial.begin(115200);
-
-
-  servo180.attach(2);
-  servo360staple.attach(4);
-  servo360snack.attach(26);
+  servo180.attach(servo180pin);
+  servo360staple.attach(servo360staplepin);
+  servo360snack.attach(servo360snackpin);
 
   pinMode(buttonPin1, INPUT_PULLUP);
   pinMode(buttonPin2, INPUT_PULLUP);
@@ -144,22 +135,15 @@ void loop() {
     previousMillis2 = currentMillis;
     ButtonState();
     //Button pertama jika ditekan
-    if (buttonState1 != lastButtonState1 && buttonState1 == LOW) {
-      //Jika isi dari penampungan makanan pokok 0 maka akan diberi peringatan, jika tidak maka akan masuk ke eksekusi "else"
-      if(staplestatus == 0){
-        Status();
-        LedGone();
-      }
-      else{
-        //Mengatur variabel posisi makanan menjadi "Staple" dan mengeluarkan makanan sebanyak 10 gram
-        mFoodPositionData = "Staple";
-        mGramValue = 10;
-        Feeding();
-      }
+    if (buttonState1 == LOW) {
+      //Mengatur variabel posisi makanan menjadi "Staple" dan mengeluarkan makanan sebanyak 10 gram
+      mFoodPositionData = "Staple";
+      mGramValue = 10;
+      Feeding();
     }
 
     //Button kedua jika ditekan
-    if (buttonState2 != lastButtonState2 && buttonState2 == LOW) {
+    if (buttonState2 == LOW) {
       //Jika posisi servo berada di posisi 180 maka akan berpindah ke posisi 0 begitupun sebaliknya
       if (servo180position == 180) {
         Status();
@@ -172,20 +156,13 @@ void loop() {
     }
     
     //Button ketiga jika ditekan
-    if (buttonState3 != lastButtonState3 && buttonState3 == LOW){
-      //Jika isi dari penampungan camilan 0 maka akan diberi peringatan, jika tidak maka akan masuk ke eksekusi "else"
-      if(snackstatus == 0){
-        Status();
-        LedGone();
-      }
+    if (buttonState3 == LOW){
       //Mengatur variabel posisi makanan menjadi "Snack" dan mengeluarkan makanan sebanyak 10 gram
-      else{
-        mFoodPositionData = "Snack";
-        mGramValue = 10;
-        Feeding();
-      }
+      mFoodPositionData = "Snack";
+      mGramValue = 10;
+      Feeding();
     }
-    LastButtonState(); 
+    //LastButtonState(); 
   }
 
   if (currentMillis - previousMillis3 >= 60000){
@@ -275,7 +252,7 @@ void Connect(){
   config.token_status_callback = tokenStatusCallback;
 
   //Mengatur ukuran buffer
-  fbdt.setBSSLBufferSize(2048 /* Rx buffer size in bytes from 512 - 16384 */, 1024 /* Tx buffer size in bytes from 512 - 16384 */);
+  //fbdt.setBSSLBufferSize(2048 /* Rx buffer size in bytes from 512 - 16384 */, 1024 /* Tx buffer size in bytes from 512 - 16384 */);
 
   //Melakukan koneksi ke firebase dengan konfigurasi dan autentikasi yang sudah diatur
   Firebase.begin(&config, &auth);
@@ -289,8 +266,9 @@ void Status(){
 
 void StatusCheck(){
   Serial.println("----Status----");
-  Firebase.RTDB.getString(&fbdt, String(IFT) + "/IFTPetFeeder/FoodPosition");
-  sFoodPositionData = fbdt.stringData();
+  ////Mengambil isi node FoodPosition dari json ke variabel schedule
+  sFoodPositionData = doc["FoodPosition"].as<String>();
+  //sFoodPositionData = fbdt.stringData();
   if (sFoodPositionData == "Staple") {
     ServoPSTNStaple();
   } 
@@ -302,20 +280,15 @@ void StatusCheck(){
 void GetFirebase(){
   if (Firebase.ready() && signupOK) {
     Serial.println("Status Perangkat : Terhubung dengan Wi-Fi dan Firebase");
+    //mengambil data dalam bentuk json dari firebase
     success = Firebase.RTDB.getJSON(&fbdt, String(IFT) + "/IFTPetFeeder");
     if (!success) {
       Serial.println("Failed to get JSON from Firebase: " + fbdt.errorReason());
       return;
     }
-    
-    firebaseJsonString = fbdt.to<FirebaseJson>().raw();
-    deserializeJson(doc, firebaseJsonString);
-    if (error) {
-        Serial.print("deserializeJson() failed: ");
-        Serial.println(error.c_str());
-        return;
-    }
-    schedule = doc["Schedule"];
+    firebaseJsonString = fbdt.to<FirebaseJson>().raw(); //Menyimpan data json yang sudah diambil dari firebase dalam bentuk data masih mentah
+    deserializeJson(doc, firebaseJsonString); //Melakukan deserialisasi terhadap data json yang masih mentah
+    schedule = doc["Schedule"]; //Mengambil isi node Schedule dari json ke variabel
     if (schedule.isNull()) {
       Serial.println("Schedule node is null.");
       return;
@@ -327,24 +300,48 @@ void GetFirebase(){
   }
 }
 
+//Fungsi untuk melakukan inisialisasi load cell
 void InitLoadcell(){
-  LoadCell.begin();
-  float calibrationValue = 1171.40;
-  unsigned long stabilizingtime = 2000;
-  boolean _tare = true;
-  LoadCell.start(stabilizingtime, _tare);
-  LoadCell.setCalFactor(calibrationValue);
+  LoadCell.begin(); //Menginisialisasi load cell
+  float calibrationValue = 1171.40; //Variabel untuk menyimpan nilai kalibrasi load cell
+  unsigned long stabilizingtime = 2000; //Variabel untuk menyimpan nilai stabilisasi load cell
+  boolean _tare = true; //Digunakan untuk mengatur nol jika kondisi load cell tidak ada beban
+  LoadCell.start(stabilizingtime, _tare); //Melakukan proses pembacaan loadcell
+  LoadCell.setCalFactor(calibrationValue); //Mengatur faktor kalibrasi loadcell yang sudah dilakukan sebelumnya
 }
 
-//Fungsi untuk menjalankan servo 360 makanan pokok
+//Fungsi melakukan perhitungan berat pada Loadcell
+void ReadLoadCell(){
+  LoadCell.update(); //Memperbarui data dari loadcell
+  float CurrentLoad = LoadCell.getData(); //Menyimpan nilai pembacaan dari loadcell
+  //Menampilkan isi berat makanan pada wadah makanan
+  Serial.print("Load_cell output val: ");
+  Serial.println(CurrentLoad);
+}
+
+//Fungsi (1) untuk menjalankan servo 360 makanan pokok
 void ServoCStaple(){
-  //Servo berputar searah jarum jam 0,15 dan berputar berwalanan jarum jam 0,1 detik dan seterusnya
-  servo360staple.write(97);
-  delay(150);
-  servo360staple.write(83);
-  delay(100);
+  //Servo berputar searah jarum jam selama 0,05 detik
+  servo360staple.write(115);
+  delay(50);
+  //Servo berhenti selama 1,5 detik
   servo360staple.write(90);
+  delay(1500);
+  //Menyimpan nilai variabel 1 untuk digunakan di history
   StapleFeed = 1;
+}
+
+//Fungsi untuk menjalankan servo 360 makanan pokok jika terdapat kemacetan pada spiral makanan
+void ServoCStapleStack(){
+  //Servo berputar berlawanan jarum jam selamat 0,4 detik
+  servo360staple.write(70);
+  delay(400);
+  //Servo berputar searah jarum jam 1 detik
+  servo360staple.write(115);
+  delay(1000);
+  //Servo berhenti selama 1,5 detik
+  servo360staple.write(90);
+  delay(1500);
 }
 
 //Fungsi untuk memberhentikan servo 360 makanan pokok
@@ -354,19 +351,32 @@ void StopServoCStaple(){
 
 //Fungsi untuk menjalankan servo 360 camilan
 void ServoCSnack() {
-  //Servo berputar searah jarum jam 0,15 dan berputar berwalanan jarum jam 0,1 detik dan seterusnya
-  servo360snack.write(97);
-  delay(150);
-  servo360snack.write(83);
-  delay(100);
+  //Servo berputar searah jarum jam selama 0,05 detik
+  servo360snack.write(115);
+  delay(50);
+  //Servo berhenti selama 1,5 detik
   servo360snack.write(90);
+  delay(1500);
+  //Menyimpan nilai variabel 1 untuk digunakan di history
   SnackFeed = 1;
+}
+
+//Fungsi untuk menjalankan servo 360 camilan jika terdapat kemacetan pada spiral makanan
+void ServoCSnackStack(){
+  //Servo berputar berlawanan jarum jam selamat 0,4 detik
+  servo360snack.write(70);
+  delay(400);
+  //Servo berputar searah jarum jam 1 detik
+  servo360snack.write(115);
+  delay(1000);
+  //Servo berhenti selama 1,5 detik
+  servo360snack.write(90);
+  delay(1500);
 }
 
 //Fungsi untuk memberhentikan servo 360 camilan
 void StopServoCSnack() {
   servo360snack.write(90);
-  SnackFeed = 1;
 }
 
 //Fungsi mengatur posisi servo ke Staple/Makanan Pokok
@@ -403,20 +413,26 @@ void ServoPSTNSnack(){
   sFoodPositionData = fbdt.stringData();
 }
 
-
+//Fungsi untuk melakukan pengecekan isi penampungan makanan pokok dan camilan
 void StapleSnackInfo() {
   //Mengukur jarak isi dari penampungan makanan pokok dan camilan
   unsigned int distanceStaple = Distance1.ping_cm();
   unsigned int distanceSnack = Distance2.ping_cm();
 
   //Melakukan pengukuran yang didapat dari penampungan makanan pokok
-  staplestatus = max(0, static_cast<int>(round((1 - (float)distanceStaple / 22) * 100)));
+  staplestatus = max(0, min(100, static_cast<int>(round((1 - ((float)distanceStaple - 2) / (22 - 2)) * 100))));
+  if (distanceStaple > 22) {
+      staplestatus = 0;
+  }
   Serial.print("Staple Storage: ");
   Serial.print(staplestatus);
   Serial.println("%");
 
   //Melakukan pengukuran yang didapat dari penampungan camilan
-  snackstatus = max(0, static_cast<int>(round((1 - (float)distanceSnack / 22) * 100)));
+  snackstatus = max(0, min(100, static_cast<int>(round((1 - ((float)distanceSnack - 2) / (22 - 2)) * 100))));
+  if (distanceSnack > 22) {
+      snackstatus = 0;
+  } 
   Serial.print("Snack Storage: ");
   Serial.print(snackstatus);
   Serial.println("%");
@@ -426,157 +442,137 @@ void StapleSnackInfo() {
   Firebase.RTDB.setInt(&fbdt, String(IFT) + "/IFTPetFeeder/Storage/Staple", staplestatus);
 }
 
-void LedGone(){
-  if (staplestatus == 0){
-    Serial.println("Staple Food Empty");
-  }
-  else if (snackstatus == 0){
-    Serial.println("Snack Food Empty");
-  }
-  for (int i = 0; i < 3; i++){
-    digitalWrite(LedRed, HIGH);
-    digitalWrite(LedGreen, HIGH);
-    delay(500);
-    digitalWrite(LedRed, LOW);
-    digitalWrite(LedGreen, LOW);
-    delay(500);
-  }
-  if (servo180position == 0){
-    digitalWrite(LedRed, HIGH);
-    digitalWrite(LedGreen, LOW);
-  }
-  else if (servo180position == 180){
-    digitalWrite(LedRed, LOW);
-    digitalWrite(LedGreen, HIGH);
-  }
-}
-
+//Fungsi untuk melakukan pengeluaran makanan secara manual
 void ManualFeeding(){
-  mCheckValue = doc["Feeding"]["Check"];
-  mFoodPositionData = doc["Feeding"]["FoodPosition"].as<String>();
-  mGramValue = doc["Feeding"]["Gram"];
+  mCheckValue = doc["Feeding"]["Check"]; //Mengambil isi dari atribut check di dalam objek Feeding ke variabel dalam bentuk int
+  mFoodPositionData = doc["Feeding"]["FoodPosition"].as<String>(); //Mengambil isi dari atribut FoodPosition di dalam objek Feeding ke variabel dalam bentuk string
+  mGramValue = doc["Feeding"]["Gram"]; //Mengambil isi dari atribut Gram di dalam objek Feeding ke variabel dalam bentuk int
+  //Melakukan pengecekan terhadap variabel mCheckValue apakah bernilai 1 atau 0
   if (mCheckValue == 1){
-    Feeding();
-    mCheckValue = 0;
+    Feeding(); //Menjalankan fungsi feeding untuk melakukan pengeluaran makanan sesuai variabel mFoodPositionData dan mGramValue
+    //Mengembalikan nilai menjadi 0 dan mengirimkannya ke firebase
+    mCheckValue = 0; 
     Firebase.RTDB.setInt(&fbdt, String(IFT) + "/IFTPetFeeder/Feeding/Check", mCheckValue);
   }
 }
 
+//Fungsi untuk mengeluarkan makanan
 void Feeding(){
   //Jika kondisi Staple atau makanan pokok maka akan dieksekusi
   if (mFoodPositionData == "Staple") {
-    //Jika isi dari penampungan makanan pokok 0 maka akan diberi peringatan, jika tidak maka akan masuk ke eksekusi "else"
-    if(staplestatus == 0){
-      Status();
-      LedGone();
+    Status();
+    ServoPSTNStaple(); //Memindahkan posisi wadah makanan ke makanan pokok
+    Serial.print(mGramValue);
+    Serial.println(" Gram");
+    //Melakukan perhitungan isi berat makanan pada wadah makanan yang ada selama 3 detik
+    unsigned long startTime = millis();
+    while (millis() - startTime < 3000) {
+      ReadLoadCell();
     }
-    else{
-      Status();
-      ServoPSTNStaple();
-      Serial.print(mGramValue);
-      Serial.println(" Gram");
-      //Melakukan perhitungan isi dari berat makanan yang ada selama 3 detik
-      unsigned long startTime = millis();
-      while (millis() - startTime < 3000) {
-        LoadCell.update();
-        float CurrentLoad = LoadCell.getData();
-        Serial.print("Load_cell output val: ");
-        Serial.println(CurrentLoad);
+    //Melakukan pengeluaran makanan sesuai dengan gram yang dibutuhkan dengan rumus berat sekarang ditambah berat yang diinginkan
+    Serial.println("Dispensing Staple Foods");
+    float TargetLoad = LoadCell.getData() + mGramValue;
+    int counter = 0; //Counter untuk menghitung berapa kali ServoCStaple() dijalankan
+    unsigned long startTimeOverall = millis(); // Waktu mulai keseluruhan
+    while (LoadCell.getData() < TargetLoad) {
+      // Periksa apakah sudah 10 menit (600000 milidetik)
+      if (millis() - startTimeOverall >= 600000) {
+          Serial.println("The loop stops because it has been 10 minutes");
+          break;
       }
-      //Melakukan pengeluaran makanan sesuai dengan gram yang dibutuhkan dengan rumus berat sekarang ditambah berat yang diinginkan
-      Serial.println("Dispensing Staple Foods");
-      float TargetLoad = LoadCell.getData() + mGramValue;
-      while ((LoadCell.getData() < TargetLoad)) {
-        ServoCStaple();
-        unsigned long startTime = millis();
-        while (millis() - startTime < 500) {
-          LoadCell.update();
-          float CurrentLoad = LoadCell.getData();
-          Serial.print("Current Load");
-          Serial.println(CurrentLoad);
-          Serial.println(" Gram");
-        }
-      } 
-      StopServoCStaple();
-      //Setiap makanan yang sudah dikeluarkan akan masuk ke dalam history yang ada di database
-      HistoryAllTime();
+      ServoCStaple(); //Menjalankan fungsi untuk memutarkan servo 360 makanan pokok
+      counter++; //Menambahkan nilai counter
+      //Melakukan perhitungan isi berat makanan pada wadah makanan yang ada selama 1 detik
+      unsigned long startTime = millis();
+      float previousLoad = floor(LoadCell.getData() * 10) / 10.0; // Simpan berat sebelum loop, dipotong ke satu desimal
+      while (millis() - startTime < 1000) {
+        ReadLoadCell();
+      }
+      // Potong berat saat ini ke satu desimal
+      float currentLoadRounded = floor(LoadCell.getData() * 10) / 10.0;
+      // Jika berat tidak berubah sampai satu desimal, cek counter
+      if (previousLoad == currentLoadRounded) {
+          if (counter % 3 == 0) {
+              ServoCStapleStack(); // Jalankan fungsi ServoCStapleStack() setiap kelipatan 3 kali
+          }
+      } else {
+          counter = 0; // Reset counter jika berat berubah
+      }
     }
-  } 
+    StopServoCStaple();
+    // Setiap makanan yang sudah dikeluarkan akan masuk ke dalam history yang ada di database
+    HistoryAllTime();
+  }
   //Jika kondisi Snack atau camilan maka akan dieksekusi
   if (mFoodPositionData == "Snack") {
-    //Jika isi dari penampungan camilan 0 maka akan diberi peringatan, jika tidak maka akan masuk ke eksekusi "else"
-    if(snackstatus == 0){
-      Status();
-      LedGone();
+    Status();
+    ServoPSTNSnack();
+    Serial.print(mGramValue);
+    Serial.println(" Gram");
+    //Melakukan perhitungan isi dari berat makanan yang ada selama 3 detik
+    unsigned long startTime = millis();
+    while (millis() - startTime < 3000) {
+      ReadLoadCell();
     }
-    else{
-      Status();
-      ServoPSTNSnack();
-      Serial.print(mGramValue);
-      Serial.println(" Gram");
-      //Melakukan perhitungan isi dari berat makanan yang ada selama 3 detik
-      unsigned long startTime = millis();
-      while (millis() - startTime < 3000) { // Run for 3 seconds
-        // check for new data/start next conversion:
-        LoadCell.update();
-        float CurrentLoad = LoadCell.getData();
-        Serial.print("Load_cell output val: ");
-        Serial.println(CurrentLoad);
+    //Melakukan pengeluaran makanan sesuai dengan gram yang dibutuhkan dengan rumus berat sekarang ditambah berat yang diinginkan
+    Serial.println("Dispensing Snack Foods");
+    float TargetLoad = LoadCell.getData() + mGramValue;
+    int counter = 0; // Counter untuk menghitung berapa kali ServoCStaple() dijalankan
+    unsigned long startTimeOverall = millis(); // Waktu mulai keseluruhan
+    while (LoadCell.getData() < TargetLoad) {
+      // Periksa apakah sudah 10 menit (600000 milidetik)
+      if (millis() - startTimeOverall >= 600000) {
+          Serial.println("The loop stops because it has been 10 minutes");
+          break; // Keluar dari loop
       }
-      //Melakukan pengeluaran makanan sesuai dengan gram yang dibutuhkan dengan rumus berat sekarang ditambah berat yang diinginkan
-      Serial.println("Dispensing Snack Foods");
-      float TargetLoad = LoadCell.getData() + mGramValue;
-      while ((LoadCell.getData() < TargetLoad)) {
-        ServoCSnack();
-        unsigned long startTime = millis();
-        while (millis() - startTime < 500) {
-          LoadCell.update();
-          float CurrentLoad = LoadCell.getData();
-          Serial.print("Current Load");
-          Serial.println(CurrentLoad);
-          Serial.println(" Gram");
-        }
-      }  
-      StopServoCSnack();
-      //Setiap makanan yang sudah dikeluarkan akan masuk ke dalam history yang ada di database
-      HistoryAllTime();
+      ServoCSnack();
+      counter++; // Increment counter setiap kali ServoCStaple() dijalankan
+      unsigned long startTime = millis();
+      float previousLoad = floor(LoadCell.getData() * 10) / 10.0; // Simpan berat sebelum loop, dipotong ke satu desimal
+      while (millis() - startTime < 1000) {
+        ReadLoadCell();
+      }
+      // Potong berat saat ini ke satu desimal
+      float currentLoadRounded = floor(LoadCell.getData() * 10) / 10.0;
+      // Jika berat tidak berubah sampai satu desimal, cek counter
+      if (previousLoad == currentLoadRounded) {
+          if (counter % 3 == 0) {
+              ServoCSnackStack(); // Jalankan fungsi ServoCStapleStack() setiap kelipatan 3 kali
+          }
+      } else {
+          counter = 0; // Reset counter jika berat berubah
+      }
     }
+    StopServoCSnack();
+    // Setiap makanan yang sudah dikeluarkan akan masuk ke dalam history yang ada di database
+    HistoryAllTime();
   }
 }
 
+//Fungsi melakukan pembacaan tombol
 void ButtonState(){
   buttonState1 = digitalRead(buttonPin1);
   buttonState2 = digitalRead(buttonPin2);
   buttonState3 = digitalRead(buttonPin3);
 }
 
-void LastButtonState(){
-  lastButtonState1 = buttonState1;
-  lastButtonState2 = buttonState2;
-  lastButtonState3 = buttonState3;
-}
-
+//Fungsi untuk menyimpan informasi waktu
 void printLocalTime(){
   struct tm timeinfo;
   if(!getLocalTime(&timeinfo)){
     Serial.println("Failed to obtain time");
     return;
   }
-
   char temp[20];
   strftime(temp, 20, "%m-%d-%Y", &timeinfo);
   DateMonthYearNTP = temp;
-
   strftime(temp, 20, "%H:%M", &timeinfo);
   HourMinuteNTP = temp;
-
   strftime(temp, 20, "%d", &timeinfo);
   DateNTP = temp;
-
   strftime(temp, 20, "%A", &timeinfo);
   timeWeekDay = temp;
 }
-
 
 void HistoryAllTime(){
   FirebaseJson json;
@@ -635,25 +631,19 @@ void HistoryPerDay() {
 
 
 void Scheduler(){
-  //Variabel untuk menghitung jumlah tugas yang telah diproses
+  // Variabel untuk menghitung jumlah tugas yang telah diproses
   Serial.println("----Scheduler----");
   int taskCount = 0;
 
-  //Memproses setiap tugas dalam objek "Schedule"
+  // Memproses setiap tugas dalam objek "Schedule"
   for (JsonPair task : schedule) {
-    //Memeriksa apakah sudah mencapai batas maksimum tugas
-    if (taskCount >= MAX_TASKS) {
-      Serial.println("Max tasks reached.");
-      break;
-    }
-
-    //Memeriksa apakah objek tugas valid
+    // Memeriksa apakah objek tugas valid
     if (task.value().isNull()) {
       Serial.println("Task object is null.");
       continue;
     }
 
-    //Mendapatkan nilai dari masing-masing properti tugas
+    // Mendapatkan nilai dari masing-masing properti tugas
     tasks[taskCount].Action = task.value()["Action"];
     tasks[taskCount].Day = task.value()["Day"].as<String>();
     tasks[taskCount].Food = task.value()["Food"].as<String>();
@@ -670,12 +660,24 @@ void Scheduler(){
     Serial.print(", Time: ");
     Serial.print(tasks[taskCount].Time);
     Serial.println();
+
+    // Memeriksa kondisi sebelum menjalankan Feeding()
     if (tasks[taskCount].Action == 1){
       if (tasks[taskCount].Day == timeWeekDay || tasks[taskCount].Day == "Everyday") {
         if (tasks[taskCount].Time == HourMinuteNTP){
           mFoodPositionData = tasks[taskCount].Food;
           mGramValue = tasks[taskCount].Gram;
-          Feeding();
+          // Memeriksa mFoodPositionData
+          if (mFoodPositionData == "Staple") {
+            if (staplestatus > 0) {
+              Feeding();
+            }
+          } 
+          else if (mFoodPositionData == "Snack") {
+            if (snackstatus > 0) {
+              Feeding();
+            }
+          }
         }
       }
     }

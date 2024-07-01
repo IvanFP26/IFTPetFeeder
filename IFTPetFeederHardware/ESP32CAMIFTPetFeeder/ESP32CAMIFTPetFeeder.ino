@@ -1,21 +1,21 @@
-#include "WiFi.h"
-#include "nvs_flash.h"
-#include "Arduino.h"
-#include "WiFi.h"
-#include "BluetoothSerial.h"
-#include "esp_camera.h"
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
-#include "driver/rtc_io.h"
-#include <LittleFS.h>
+#include <WiFi.h>
 #include <Firebase_ESP_Client.h>
-#include "addons/TokenHelper.h"
-#include "addons/RTDBHelper.h"
+#include <addons/TokenHelper.h>
+#include <addons/RTDBHelper.h>
+//#include <Arduino.h>
+#include <BluetoothSerial.h>
+#include <esp_camera.h>
+#include <soc/soc.h>
+#include <soc/rtc_cntl_reg.h>
+#include <driver/rtc_io.h>
+#include <LittleFS.h>
+#include <nvs_flash.h>
 
 #define API_KEY "AIzaSyA6R1rzEfKVWiNFu1sTIbMHkH7zQ3EYgBk"
+#define DATABASE_URL "https://iftpetfeedercoba-default-rtdb.asia-southeast1.firebasedatabase.app/"
+#define STORAGE_BUCKET_ID "iftpetfeedercoba.appspot.com"
 #define USER_EMAIL "petfeederift@gmail.com"
 #define USER_PASSWORD "123456"
-#define STORAGE_BUCKET_ID "iftpetfeedercoba.appspot.com"
 #define FILE_PHOTO_PATH "/photo.jpg"
 #define BUCKET_PHOTO "/data/photo.jpg"
 
@@ -37,17 +37,15 @@
 #define PCLK_GPIO_NUM     22
 #define pirPin 13
 
-int MAX_RETRY_COUNT = 3;
-
 int val = 0;
-bool motionState = false;
-boolean takeNewPhoto = true;
-unsigned long lastPhotoTime = 0;
+//bool motionState = false;
+//boolean takeNewPhoto = true;
+//unsigned long lastPhotoTime = 0;
 String downloadURL, tokens;
-FirebaseData fbdo;
+FirebaseData fbdt;
 FirebaseAuth auth;
-FirebaseConfig configF;
-bool taskCompleted = false;
+FirebaseConfig config;
+//bool taskCompleted = false;
 const char* IFT = "/IFTPetFeeder1";
 const char* Token = "TW01";
 BluetoothSerial SerialBT;
@@ -58,8 +56,9 @@ String WIFI_SSID = "";
 String WIFI_PASSWORD = "";
 bool receivedSSID = false;
 bool receivedPASS = false;
-bool setupWiFi = false;
+//bool setupWiFi = false;
 
+unsigned long previousMillis1 = 0;
 
 char ssid_buffer[32] = "";
 char password_buffer[64] = "";
@@ -73,28 +72,17 @@ void setup() {
   initLittleFS();
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   initCamera();
-  configF.database_url = "https://iftpetfeedercoba-default-rtdb.asia-southeast1.firebasedatabase.app/";
-  configF.api_key = API_KEY;
-  auth.user.email = USER_EMAIL;
-  auth.user.password = USER_PASSWORD;
-
-  if (Firebase.signUp(&configF, &auth, "", "")) {
-    Serial.println("ok");
-    signupOK = true;
-  }
-  else {
-    Serial.printf("%s\n", configF.signer.signupError.message.c_str());
-  }
-
-  configF.token_status_callback = tokenStatusCallback;
-  Firebase.begin(&configF, &auth);
-  Firebase.reconnectWiFi(true);
+  ConfigFirebase();
 }
 
 void loop() {
-  checkFirebaseStatus();
-  BTConnectWIFI();
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis1 >= 10000){
+    previousMillis1 = currentMillis;
+    checkFirebaseStatus();
+  }
 
+  BTConnectWIFI();
   val = digitalRead(pirPin);
   //Jika ada pergerakan di sekitar sensor PIR maka perintah akan dieksekusi
   if (val == HIGH){
@@ -204,18 +192,46 @@ void BTConnectWIFI(){
   }
 }
 
+void ConfigFirebase(){
+  config.database_url = DATABASE_URL;
+  config.api_key = API_KEY;
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
+
+  if (Firebase.signUp(&config, &auth, "", "")) {
+    Serial.println("ok");
+    signupOK = true;
+  }
+  else {
+    Serial.printf("%s\n", config.signer.signupError.message.c_str());
+  }
+
+  config.token_status_callback = tokenStatusCallback;
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+}
+
 void checkFirebaseStatus() {
-  if (!Firebase.ready()) {
-    Serial.println("Firebase not ready, reconnecting...");
-    reconnectFirebase();
+  if (Firebase.ready() && signupOK) {
+    Serial.println("Status Perangkat ESP32CAM : Terhubung dengan Wi-Fi dan Firebase");
+    SerialBT.println("Status Perangkat ESP32CAM : Terhubung dengan Wi-Fi dan Firebase");
+  }
+  else{
+    Serial.print("Status Perangkat ESP32CAM: ");
+    SerialBT.print("Status Perangkat ESP32CAM: ");
+    Serial.println(fbdt.errorReason());
+    SerialBT.print(fbdt.errorReason());
   }
 }
 
+/*
 void reconnectFirebase() {
   Serial.println("Reconnecting to Firebase...");
-  Firebase.begin(&configF, &auth);
+  Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
+  Serial.println("Status Perangkat : Terhubung dengan Wi-Fi dan Firebase");
 }
+*/
 
 //Fungsi untuk mengupload photo yang telah diambil ke firebase
 void UploadPhototoFirebase(){
@@ -225,13 +241,13 @@ void UploadPhototoFirebase(){
     if (Firebase.ready() && signupOK){
       //Mengupload photo ke firebase dari LittleFS memori internal
       Serial.print("Uploading picture... ");
-      if (!Firebase.Storage.upload(&fbdo, STORAGE_BUCKET_ID, FILE_PHOTO_PATH, mem_storage_type_flash, BUCKET_PHOTO, "image/jpeg", fcsUploadCallback)) {
+      if (!Firebase.Storage.upload(&fbdt, STORAGE_BUCKET_ID, FILE_PHOTO_PATH, mem_storage_type_flash, BUCKET_PHOTO, "image/jpeg", fcsUploadCallback)) {
         Serial.println("Upload failed");
-        Serial.println(fbdo.errorReason());
+        Serial.println(fbdt.errorReason());
       }
     } else {
       Serial.println("Firebase not ready or sign up not OK.");
-      Serial.println(fbdo.errorReason());
+      Serial.println(fbdt.errorReason());
     }
   } else {
     Serial.println("WiFi not connected. Cannot upload photo.");
@@ -368,13 +384,11 @@ void fcsUploadCallback(FCS_UploadStatusInfo info){
   {
       Serial.println("Upload completed\n");
       SerialBT.println("Upload completed\n");
-      FileMetaInfo meta = fbdo.metaData();
-      Serial.printf("Name: %s\nBucket: %s\ncontentType: %s\nSize: %d\nGeneration: %lu\nMetageneration: %lu\nETag: %s\nCRC32: %s\nTokens: %s\nDownload URL: %s\n", meta.name.c_str(), meta.bucket.c_str(), meta.contentType.c_str(), meta.size, meta.generation, meta.metageneration, meta.etag.c_str(), meta.crc32.c_str(), meta.downloadTokens.c_str(), fbdo.downloadURL().c_str());
-      SerialBT.printf("Name: %s\nBucket: %s\ncontentType: %s\nSize: %d\nGeneration: %lu\nMetageneration: %lu\nETag: %s\nCRC32: %s\nTokens: %s\nDownload URL: %s\n", meta.name.c_str(), meta.bucket.c_str(), meta.contentType.c_str(), meta.size, meta.generation, meta.metageneration, meta.etag.c_str(), meta.crc32.c_str(), meta.downloadTokens.c_str(), fbdo.downloadURL().c_str());
-      downloadURL = fbdo.downloadURL().c_str();
-      tokens = meta.downloadTokens.c_str();
-      Firebase.RTDB.setString(&fbdo, String(IFT) + "/IFTPetFeeder/ImageCapture/Link", downloadURL);
-      Firebase.RTDB.setString(&fbdo, String(IFT) + "/IFTPetFeeder/ImageCapture/Tokens", tokens);
+      FileMetaInfo meta = fbdt.metaData();
+      Serial.printf("Download URL: %s\n", fbdt.downloadURL().c_str());
+      SerialBT.printf("Download URL: %s\n", fbdt.downloadURL().c_str());
+      downloadURL = fbdt.downloadURL().c_str();
+      Firebase.RTDB.setString(&fbdt, String(IFT) + "/IFTPetFeeder/ImageCapture/Link", downloadURL);
   }
   else if (info.status == firebase_fcs_upload_status_error){
       Serial.printf("Upload failed %s\n", info.errorMsg.c_str());
