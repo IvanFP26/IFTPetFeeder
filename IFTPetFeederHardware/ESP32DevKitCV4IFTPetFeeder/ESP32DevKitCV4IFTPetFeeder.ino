@@ -127,8 +127,8 @@ void loop() {
     previousMillis1 = currentMillis;
     GetFirebase();
     StapleSnackInfo();
-    ManualFeeding();
     StatusCheck();
+    ManualFeeding();
   }
 
   if (currentMillis - previousMillis2 >= 100){
